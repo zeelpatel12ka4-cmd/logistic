@@ -31,6 +31,25 @@ Traditional supply chains rely on isolated, mutable databases owned by individua
 
 **ChainTrace Enterprise solves this by anchoring ownership and product commitments on an EVM blockchain (`ChainTraceRegistry.sol`) while treating PostgreSQL strictly as a fast, rebuildable search projection.**
 
+### Supply Chain Lifecycle at a Glance
+
+```mermaid
+stateDiagram-v2
+  [*] --> Manufactured: "Manufacturer anchors batch Merkle root (O(1) gas)"
+  Manufactured --> InTransit: "initiateBatchTransfer / materializeAndInitiateTransfer"
+  InTransit --> AtDistributor: "Distributor calls acceptCustody"
+  AtDistributor --> InTransit: "initiateTransfer"
+  InTransit --> AtWarehouse: "Warehouse calls acceptCustody"
+  AtWarehouse --> InTransit: "initiateTransfer"
+  InTransit --> AtRetailer: "Retailer calls acceptCustody"
+  AtRetailer --> Claimed: "Customer scans QR + sealed claimSecret"
+  Claimed --> ClonedQrBlocked: "2nd scan or claim reverts AlreadyClaimed"
+  Manufactured --> Recalled: "recallBatch / flagProduct"
+  AtDistributor --> Recalled: "recallBatch / flagProduct"
+  AtWarehouse --> Recalled: "recallBatch / flagProduct"
+  AtRetailer --> Recalled: "recallBatch / flagProduct"
+```
+
 ---
 
 ## 2. System Architecture & Source-of-Truth Model
@@ -83,6 +102,19 @@ flowchart LR
 - EIP-712 typed-signature meta-transactions (`executeTransferBySig`, `claimProductBySig`) with `deadline` and `nonce` replay protection.
 - Double-hashed Merkle leaf verification (`keccak256(bytes.concat(keccak256(abi.encode(...))))`) immune to second-preimage attacks.
 
+#### How 1,000,000 Products Anchor in 1 Blockchain Transaction
+
+```mermaid
+flowchart TD
+  Units["100,000 - 1,000,000 Product Units (Serial + MetadataHash + SecretHash)"] -->|"Double Keccak256 Leaf"| Tree["Merkle Tree Builder"]
+  Meta["Batch Specs JSON"] -->|"Pin Content"| Ipfs["IPFS Kubo CID"]
+  Tree -->|"Single 32-byte Root"| Contract["registerBatch(batchId, merkleRoot, ipfsCid, unitCount)"]
+  Ipfs --> Contract
+  Contract -->|"O(1) Gas (~213k)"| Chain["Anchored On-Chain"]
+  Chain -->|"Later: Split 1 Unit"| Split["materializeAndInitiateTransfer(merkleProof)"]
+  Split -->|"MerkleProof.verify == true"| Lazy["Lazy On-Chain Product State Created"]
+```
+
 ### Module 4: Blockchain Explorer & Anomaly Monitor (`/explorer`)
 - Live chain tip, indexer lag, canonical/reorged event stream, and RPC pool circuit-breaker status.
 - Interactive transaction hash verifier querying live on-chain receipts, decoded logs, and indexed records.
@@ -97,6 +129,31 @@ flowchart LR
 - **Trustless Direct-RPC Mode**: Toggle that verifies Merkle inclusion and live contract state directly from the browser via RPC/MetaMask without trusting or calling the backend API.
 - Displays full supply-chain provenance timeline, manufacturing specs, recall/tamper warnings, and **One-Time Sealed Claim** activation (`claimProduct`) to permanently block cloned QR stickers.
 
+#### Dual-Mode Verification (Even If Backend or DB Fails)
+
+```mermaid
+sequenceDiagram
+  participant Customer as "Customer Browser"
+  participant Api as "Backend API"
+  participant Db as "PostgreSQL"
+  participant Chain as "EVM Smart Contract"
+
+  alt "Normal Mode (All Services Up)"
+    Customer->>Api: "POST /api/verify/qr or GET /api/verify/:id"
+    Api->>Db: "Fetch timeline, shipments & scan history"
+    Api->>Chain: "verifyProductAuthenticity(merkleProof)"
+    Api-->>Customer: "VERIFIED_AUTHENTIC + Full Timeline"
+  else "PostgreSQL Offline (Degraded Stateless Mode)"
+    Customer->>Api: "GET /api/verify/:id?merkleProof=..."
+    Api--xDb: "Connection Refused"
+    Api->>Chain: "verifyProductAuthenticity(merkleProof)"
+    Api-->>Customer: "CHAIN_DIRECT_DB_DEGRADED (Still Verified!)"
+  else "Trustless Direct-RPC Mode (Zero Backend Trust)"
+    Customer->>Chain: "Browser calls verifyProductAuthenticity directly via RPC/MetaMask"
+    Chain-->>Customer: "Cryptographic Proof + Live Owner & Status"
+  end
+```
+
 ---
 
 ## 4. Advanced Engineering & Failure Resilience
@@ -110,6 +167,19 @@ flowchart LR
 | **PostgreSQL Becomes Unavailable** | `GET /api/verify/:identifier` catches DB errors and falls back to **Stateless Direct-RPC Mode** (`CHAIN_DIRECT_DB_DEGRADED`) using the QR Merkle proof against `ChainTraceRegistry.verifyProductAuthenticity`. |
 | **Indexer Crash & Restart** | Events, block headers, projections, and `indexer_checkpoints` commit in a single PostgreSQL transaction with `UNIQUE (chain_id, block_hash, tx_hash, log_index)` idempotency (`ON CONFLICT DO NOTHING`). |
 | **10,000 Concurrent Write/Read Calls** | Reads scale via indexed Postgres + RPC pool; optional gasless claims route through `RelayerQueueService` with Postgres `idempotency_key` deduplication and serialized nonce signing. |
+
+### How Reorg Rollback & Crash Recovery Work
+
+```mermaid
+flowchart TD
+  Start["Indexer Poll Tick"] --> Check["Compare chainBlock(lastIndexed).hash vs DB indexed_blocks"]
+  Check -->|"Match"| Fetch["Fetch eth_getLogs + Check status=0 Failed Txs"]
+  Check -->|"Mismatch (Chain Reorg)"| Walk["Walk Back to Common Ancestor Block A"]
+  Walk --> Rollback["BEGIN Tx: Mark Events > A is_reorged=TRUE + Log reorg_events + Recompute Projections <= A"]
+  Rollback --> Fetch
+  Fetch --> Atomic["BEGIN Tx: ON CONFLICT DO NOTHING Insert Events + Update Products/Batches + Checkpoint"]
+  Atomic --> Commit["COMMIT (Crash-Safe & Idempotent)"]
+```
 
 ---
 
