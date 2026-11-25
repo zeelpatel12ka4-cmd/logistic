@@ -1,0 +1,27 @@
+{
+  "name": "@chaintrace/contracts",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "compile": "hardhat compile",
+    "build": "hardhat compile",
+    "typecheck": "tsc --noEmit",
+    "test": "hardhat test",
+    "test:gas": "node -e \"process.env.REPORT_GAS='true'; require('child_process').execSync('npx hardhat test',{stdio:'inherit'})\"",
+    "coverage": "hardhat coverage",
+    "node": "hardhat node",
+    "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
+    "deploy:sepolia": "hardhat run scripts/deploy.ts --network sepolia",
+    "clean": "hardhat clean"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.3.0",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
+    "@types/node": "^22.13.0",
+    "hardhat": "^2.28.0",
+    "typescript": "^5.8.2"
+  }
+}

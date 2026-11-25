@@ -1,0 +1,34 @@
+FROM node:22-alpine AS builder
+ARG NEXT_PUBLIC_API_URL=http://localhost:4000
+ARG NEXT_PUBLIC_RPC_URL=http://127.0.0.1:8545
+ARG NEXT_PUBLIC_CHAIN_ID=31337
+ARG NEXT_PUBLIC_CONTRACT_ADDRESS=
+
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_RPC_URL=$NEXT_PUBLIC_RPC_URL
+ENV NEXT_PUBLIC_CHAIN_ID=$NEXT_PUBLIC_CHAIN_ID
+ENV NEXT_PUBLIC_CONTRACT_ADDRESS=$NEXT_PUBLIC_CONTRACT_ADDRESS
+
+WORKDIR /app
+
+COPY package.json package-lock.json* tsconfig.base.json ./
+COPY packages/shared/package.json packages/shared/
+COPY packages/contracts/package.json packages/contracts/
+COPY apps/indexer/package.json apps/indexer/
+COPY apps/api/package.json apps/api/
+COPY apps/web/package.json apps/web/
+
+RUN npm ci --ignore-scripts || npm install --ignore-scripts
+
+COPY packages/shared packages/shared
+COPY apps/web apps/web
+
+RUN npm run build --workspace=@chaintrace/shared && \
+    npm run build --workspace=@chaintrace/web
+
+FROM node:22-alpine AS runner
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=builder /app /app
+EXPOSE 3000
+CMD ["npm", "run", "start", "--workspace=@chaintrace/web"]

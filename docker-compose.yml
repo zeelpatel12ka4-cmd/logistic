@@ -1,0 +1,150 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: chaintrace-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-chaintrace}
+      POSTGRES_USER: ${POSTGRES_USER:-chaintrace}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chaintrace_dev_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - chaintrace_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-chaintrace} -d ${POSTGRES_DB:-chaintrace}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - chaintrace-net
+
+  ipfs:
+    image: ipfs/kubo:v0.32.1
+    container_name: chaintrace-ipfs
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+      - "8080:8080"
+    volumes:
+      - chaintrace_ipfs:/data/ipfs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- --post-data='' http://127.0.0.1:5001/api/v0/id || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - chaintrace-net
+
+  hardhat-node:
+    image: node:22-alpine
+    container_name: chaintrace-hardhat
+    profiles: ["full"]
+    working_dir: /workspace
+    command: sh -c "npx hardhat node --hostname 0.0.0.0 --port 8545"
+    ports:
+      - "8545:8545"
+    volumes:
+      - .:/workspace
+      - chaintrace_node_modules:/workspace/node_modules
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- --header='Content-Type: application/json' --post-data='{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' http://127.0.0.1:8545 | grep -q result || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    networks:
+      - chaintrace-net
+
+  indexer:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.service
+      args:
+        SERVICE_WORKSPACE: "@chaintrace/indexer"
+        SERVICE_ENTRY: "apps/indexer/dist/index.js"
+    container_name: chaintrace-indexer
+    profiles: ["full"]
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ipfs:
+        condition: service_healthy
+      hardhat-node:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-chaintrace}:${POSTGRES_PASSWORD:-chaintrace_dev_password}@postgres:5432/${POSTGRES_DB:-chaintrace}
+      IPFS_API_URL: http://ipfs:5001
+      RPC_URLS: http://hardhat-node:8545
+      CHAIN_ID: ${CHAIN_ID:-31337}
+      CONFIRMATIONS_REQUIRED: ${CONFIRMATIONS_REQUIRED:-2}
+      CONTRACT_ADDRESS: ${CONTRACT_ADDRESS:-}
+    networks:
+      - chaintrace-net
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.service
+      args:
+        SERVICE_WORKSPACE: "@chaintrace/api"
+        SERVICE_ENTRY: "apps/api/dist/index.js"
+    container_name: chaintrace-api
+    profiles: ["full"]
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ipfs:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-4000}:4000"
+    environment:
+      NODE_ENV: production
+      API_PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-chaintrace}:${POSTGRES_PASSWORD:-chaintrace_dev_password}@postgres:5432/${POSTGRES_DB:-chaintrace}
+      IPFS_API_URL: http://ipfs:5001
+      IPFS_GATEWAY_URL: http://ipfs:8080
+      RPC_URLS: http://hardhat-node:8545
+      CHAIN_ID: ${CHAIN_ID:-31337}
+      JWT_SECRET: ${JWT_SECRET:-dev_only_change_me_at_least_32_characters_long}
+      SIWE_DOMAIN: ${SIWE_DOMAIN:-localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      CONTRACT_ADDRESS: ${CONTRACT_ADDRESS:-}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - chaintrace-net
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.web
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+        NEXT_PUBLIC_RPC_URL: ${NEXT_PUBLIC_RPC_URL:-http://127.0.0.1:8545}
+        NEXT_PUBLIC_CHAIN_ID: ${NEXT_PUBLIC_CHAIN_ID:-31337}
+        NEXT_PUBLIC_CONTRACT_ADDRESS: ${NEXT_PUBLIC_CONTRACT_ADDRESS:-}
+    container_name: chaintrace-web
+    profiles: ["full"]
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    networks:
+      - chaintrace-net
+
+volumes:
+  chaintrace_pgdata:
+  chaintrace_ipfs:
+  chaintrace_node_modules:
+
+networks:
+  chaintrace-net:
+    driver: bridge

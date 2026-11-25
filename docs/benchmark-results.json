@@ -1,0 +1,19 @@
+{
+  "timestamp": "2026-11-25T07:58:30.039Z",
+  "merkle100kBuildMs": 28084.93,
+  "dbRowsSeeded": 1000000,
+  "dbSeedDurationMs": 0,
+  "exactSerialLookupAt1MMs": 5.07,
+  "cursorPaginationAt1MMs": 2.72,
+  "httpLoadTest": {
+    "totalRequests": 10000,
+    "concurrencyWindow": 200,
+    "succeeded": 10000,
+    "failed": 0,
+    "totalDurationMs": 7564.9,
+    "requestsPerSec": 1321.89,
+    "p50Ms": 107.85,
+    "p95Ms": 176.47,
+    "p99Ms": 421.94
+  }
+}

@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build artifacts
+dist/
+build/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# Hardhat & Solidity
+packages/contracts/artifacts/
+packages/contracts/cache/
+packages/contracts/typechain-types/
+packages/contracts/gas-report.txt
+
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Logs & OS
+logs/
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# Generated runtime exports
+tmp/
+.chaintrace-deployments.local.json

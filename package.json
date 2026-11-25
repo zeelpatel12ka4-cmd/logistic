@@ -1,0 +1,35 @@
+{
+  "name": "chaintrace-enterprise",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ChainTrace Enterprise - Decentralized Supply Chain Tracking & Product Authentication Platform",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=@chaintrace/shared && npm run build --workspace=@chaintrace/contracts && npm run build --workspace=@chaintrace/indexer && npm run build --workspace=@chaintrace/api && npm run build --workspace=@chaintrace/web",
+    "typecheck": "npm run typecheck --workspace=@chaintrace/shared && npm run typecheck --workspace=@chaintrace/contracts && npm run typecheck --workspace=@chaintrace/indexer && npm run typecheck --workspace=@chaintrace/api && npm run typecheck --workspace=@chaintrace/web",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspace=@chaintrace/shared && npm run test --workspace=@chaintrace/contracts && npm run test --workspace=@chaintrace/indexer && npm run test --workspace=@chaintrace/api",
+    "contracts:compile": "npm run compile --workspace=@chaintrace/contracts",
+    "contracts:test": "npm run test --workspace=@chaintrace/contracts",
+    "contracts:coverage": "npm run coverage --workspace=@chaintrace/contracts",
+    "contracts:deploy:local": "npm run deploy:local --workspace=@chaintrace/contracts",
+    "chain:node": "npm run node --workspace=@chaintrace/contracts",
+    "db:migrate": "npm run migrate --workspace=@chaintrace/api",
+    "dev:indexer": "npm run dev --workspace=@chaintrace/indexer",
+    "dev:api": "npm run dev --workspace=@chaintrace/api",
+    "dev:web": "npm run dev --workspace=@chaintrace/web",
+    "docker:infra": "docker compose up -d postgres ipfs",
+    "docker:down": "docker compose down"
+  },
+  "devDependencies": {
+    "prettier": "^3.5.3",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
