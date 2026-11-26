@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { Pool } from 'pg';
-import { Bytes32Schema, CreateBatchRequestSchema } from '@chaintrace/shared';
-import { AuthenticatedRequest, requireAuth, requireRoles } from '../middleware/auth';
+import { Bytes32Schema, CreateBatchRequestSchema, SupplyChainRole } from '@chaintrace/shared';
+import { AuthenticatedRequest, requireAuth, requireLiveRoles } from '../middleware/auth';
 import { HttpError } from '../middleware/errorHandler';
 import { BatchService } from '../services/batchService';
 
@@ -9,13 +9,14 @@ export function createBatchesRouter(
   pool: Pool,
   batchService: BatchService,
   jwtSecret: string,
+  resolveRoles: (walletAddress: string) => Promise<SupplyChainRole[]>,
 ): Router {
   const router = Router();
 
   router.post(
     '/prepare',
     requireAuth(jwtSecret),
-    requireRoles('MANUFACTURER'),
+    requireLiveRoles(resolveRoles, 'MANUFACTURER'),
     async (req: AuthenticatedRequest, res, next) => {
       try {
         const input = CreateBatchRequestSchema.parse(req.body);
@@ -126,12 +127,17 @@ export function createBatchesRouter(
   router.get(
     '/:batchId/products/:identifier/qr',
     requireAuth(jwtSecret),
-    requireRoles('MANUFACTURER', 'ADMIN'),
+    requireLiveRoles(resolveRoles, 'MANUFACTURER', 'ADMIN'),
     async (req: AuthenticatedRequest, res, next) => {
       try {
         const batchId = Bytes32Schema.parse(req.params.batchId);
         const identifier = req.params.identifier;
-        const bundle = await batchService.buildProductQrBundle(batchId, identifier, true);
+        const bundle = await batchService.buildProductQrBundle(
+          batchId,
+          identifier,
+          true,
+          req.auth!.walletAddress,
+        );
         res.status(200).json(bundle);
       } catch (err) {
         next(err);

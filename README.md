@@ -320,12 +320,29 @@ npx tsx scripts/benchmark_scale.ts
 
 ---
 
-## 10. Documentation Index
+## 10. Security Limitations & Known Issues
 
+1. **Physical Packaging Authenticity:** Blockchain & Merkle verification proves that a QR payload corresponds to a registered digital commitment. It does not independently prove that the physical item or sticker has not been cloned or swapped. Production deployments should pair this with tamper-evident scratch-off QR labels or cryptographic NFC tags.
+2. **External Audit Status:** `ChainTraceRegistry.sol` has undergone internal engineering review and automated `solidity-coverage` testing (`12/12` tests, `98.81%` statements, `80.25%` branches, `100%` functions), **not** an independent third-party smart contract audit.
+3. **Production Secret Requirements:** `NODE_ENV=production` fails closed unless `JWT_SECRET` (`>= 32` chars) and `SECRET_ENCRYPTION_KEY` (32-byte hex/base64) are explicitly provided.
+4. **Live Testnet / Mainnet Status:** Validated on local Hardhat (`chainId 31337`) and local Docker containers; no public testnet or mainnet deployment has been executed.
+
+---
+
+## 11. Documentation Index
+
+- [Baseline Engineering Audit](file:///c:/Users/zeelp/OneDrive/Desktop/blockchain/docs/ENGINEERING_AUDIT.md)
+- [Toolchain & Monorepo Consistency](file:///c:/Users/zeelp/OneDrive/Desktop/blockchain/docs/TOOLCHAIN.md)
+- [Smart Contract Security Review](file:///c:/Users/zeelp/OneDrive/Desktop/blockchain/docs/SMART_CONTRACT_SECURITY_REVIEW.md)
+- [Scale & Million-Product Architecture](file:///c:/Users/zeelp/OneDrive/Desktop/blockchain/docs/SCALE_AND_PERFORMANCE.md)
+- [API & Claim Secret Security Review](file:///c:/Users/zeelp/OneDrive/Desktop/blockchain/docs/API_SECURITY_REVIEW.md)
+- [Durable Relayer Reliability](file:///c:/Users/zeelp/OneDrive/Desktop/blockchain/docs/RELAYER_RELIABILITY.md)
+- [Indexer Recovery & Reorg Safety](file:///c:/Users/zeelp/OneDrive/Desktop/blockchain/docs/INDEXER_RECOVERY.md)
+- [Database Review](file:///c:/Users/zeelp/OneDrive/Desktop/blockchain/docs/DATABASE_REVIEW.md)
+- [Deployment Guide](file:///c:/Users/zeelp/OneDrive/Desktop/blockchain/docs/DEPLOYMENT_GUIDE.md)
 - [System Architecture](file:///c:/Users/zeelp/OneDrive/Desktop/blockchain/docs/architecture.md)
 - [Database Schema & Indexing](file:///c:/Users/zeelp/OneDrive/Desktop/blockchain/docs/database-schema.md)
 - [Smart Contract Test & Coverage Report](file:///c:/Users/zeelp/OneDrive/Desktop/blockchain/docs/smart-contract-test-report.md)
-- [Smart Contract & Platform Security Audit](file:///c:/Users/zeelp/OneDrive/Desktop/blockchain/docs/smart-contract-security-audit.md)
 - [Performance & 1M-Scale Report](file:///c:/Users/zeelp/OneDrive/Desktop/blockchain/docs/performance-report.md)
 - [Interview Architectural Defense (Q1–Q5)](file:///c:/Users/zeelp/OneDrive/Desktop/blockchain/docs/interview-qa.md)
 - [GitHub Actions CI Workflow](file:///c:/Users/zeelp/OneDrive/Desktop/blockchain/.github/workflows/ci.yml)

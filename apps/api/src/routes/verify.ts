@@ -98,14 +98,12 @@ export function createVerifyRouter(
     const onChain = await queryOnChainAuthenticity(contractAddress, params);
     let ipfsMetadata: unknown = null;
     let ipfsIntegrityVerified = false;
+    let ipfsStatus = 'METADATA_UNAVAILABLE';
     if (onChain.ipfsCid) {
-      try {
-        const fetched = await ipfsClient.fetchAndVerifyJson(onChain.ipfsCid, params.metadataHash);
-        ipfsMetadata = fetched.data;
-        ipfsIntegrityVerified = fetched.verified;
-      } catch {
-        ipfsMetadata = null;
-      }
+      const fetched = await ipfsClient.fetchAndVerifyJson(onChain.ipfsCid, params.metadataHash);
+      ipfsMetadata = fetched.data;
+      ipfsIntegrityVerified = fetched.verified;
+      ipfsStatus = fetched.status;
     }
 
     const verdict = !onChain.isMerkleValid
@@ -119,6 +117,8 @@ export function createVerifyRouter(
     return {
       verdict,
       source: params.source,
+      physicalAuthenticityNote:
+        'Cryptographic verification confirms the digital commitment only; it does not independently prove physical tamper-evidence of packaging.',
       warning:
         params.source === 'CHAIN_DIRECT_DB_DEGRADED'
           ? 'PostgreSQL is offline; ownership was verified directly against the blockchain.'
@@ -134,6 +134,7 @@ export function createVerifyRouter(
       onChain,
       ipfs: {
         cid: onChain.ipfsCid,
+        status: ipfsStatus,
         integrityVerified: ipfsIntegrityVerified,
         metadata: ipfsMetadata,
       },

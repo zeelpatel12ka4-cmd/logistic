@@ -778,6 +778,8 @@ contract ChainTraceRegistry is AccessControl, EIP712, ReentrancyGuard {
 
         batch.recalled = true;
         batch.batchStatus = CustodyStatus.Recalled;
+        batch.pendingBatchCustodian = address(0);
+        batch.pendingBatchTargetStatus = CustodyStatus.Uninitialized;
         emit BatchRecalled(batchId, msg.sender, reason, uint64(block.timestamp));
     }
 
@@ -797,6 +799,8 @@ contract ChainTraceRegistry is AccessControl, EIP712, ReentrancyGuard {
 
         product.recalled = true;
         product.status = CustodyStatus.Recalled;
+        product.pendingCustodian = address(0);
+        product.targetStatus = CustodyStatus.Uninitialized;
         product.updatedAt = uint64(block.timestamp);
         emit ProductFlagged(productId, msg.sender, reason, uint64(block.timestamp));
     }
@@ -833,6 +837,8 @@ contract ChainTraceRegistry is AccessControl, EIP712, ReentrancyGuard {
 
         product.recalled = true;
         product.status = CustodyStatus.Recalled;
+        product.pendingCustodian = address(0);
+        product.targetStatus = CustodyStatus.Uninitialized;
         product.updatedAt = uint64(block.timestamp);
         emit ProductFlagged(productId, msg.sender, reason, uint64(block.timestamp));
     }

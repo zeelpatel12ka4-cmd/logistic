@@ -645,11 +645,12 @@ export class ReorgSafeIndexer {
         await client.query(
           `INSERT INTO batches (
              batch_id, chain_id, manufacturer_address, batch_custodian, merkle_root,
-             ipfs_cid, unit_count, batch_status, previous_batch_status, tx_hash, block_number, is_finalized
-           ) VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$7,$8,$9,$10)
+             ipfs_cid, unit_count, batch_status, previous_batch_status, onchain_confirmed, tx_hash, block_number, is_finalized
+           ) VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$7,TRUE,$8,$9,$10)
            ON CONFLICT (batch_id)
            DO UPDATE SET merkle_root = EXCLUDED.merkle_root,
                          ipfs_cid = EXCLUDED.ipfs_cid,
+                         onchain_confirmed = TRUE,
                          tx_hash = EXCLUDED.tx_hash,
                          block_number = EXCLUDED.block_number,
                          is_finalized = EXCLUDED.is_finalized,
@@ -864,6 +865,15 @@ export class ReorgSafeIndexer {
                updated_at = NOW()
            WHERE product_id = $1`,
           [mapped.productId, mapped.toAddress, CustodyStatus.Claimed, mapped.nonce, txHash, blockNumber],
+        );
+        await client.query(
+          `UPDATE product_secrets
+           SET claim_secret = NULL,
+               encrypted_claim_secret = NULL,
+               retired_at = NOW(),
+               retired_reason = 'CLAIMED_ON_CHAIN'
+           WHERE product_id = $1 AND retired_at IS NULL`,
+          [mapped.productId],
         );
         break;
 

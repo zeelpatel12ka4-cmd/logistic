@@ -83,12 +83,14 @@ export function createApp(deps: AppDependencies) {
     config.contractAddress,
     config.jwtSecret,
     config.chainId,
+    config.siweDomain,
   );
   const batchService = new BatchService(
     pool,
     ipfsClient,
     config.chainId,
     config.contractAddress,
+    config.secretEncryptionKey,
   );
   const relayerService = new RelayerQueueService(
     pool,
@@ -96,10 +98,11 @@ export function createApp(deps: AppDependencies) {
     config.contractAddress,
     config.relayerPrivateKey,
   );
+  const resolveRoles = authService.resolveOnChainRoles.bind(authService);
 
   app.use('/api/auth', authLimiter, createAuthRouter(authService, config.jwtSecret));
-  app.use('/api/batches', createBatchesRouter(pool, batchService, config.jwtSecret));
-  app.use('/api/products', createProductsRouter(pool, batchService, config.jwtSecret));
+  app.use('/api/batches', createBatchesRouter(pool, batchService, config.jwtSecret, resolveRoles));
+  app.use('/api/products', createProductsRouter(pool, batchService, config.jwtSecret, resolveRoles));
   app.use(
     '/api/explorer',
     createExplorerRouter(pool, rpcPool, config.contractAddress, config.chainId),

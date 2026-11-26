@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { Pool } from 'pg';
-import { ShipmentNoteSchema } from '@chaintrace/shared';
-import { AuthenticatedRequest, requireAuth, requireRoles } from '../middleware/auth';
+import { ShipmentNoteSchema, SupplyChainRole } from '@chaintrace/shared';
+import { AuthenticatedRequest, requireAuth, requireLiveRoles } from '../middleware/auth';
 import { HttpError } from '../middleware/errorHandler';
 import { BatchService } from '../services/batchService';
 
@@ -9,6 +9,7 @@ export function createProductsRouter(
   pool: Pool,
   batchService: BatchService,
   jwtSecret: string,
+  resolveRoles: (walletAddress: string) => Promise<SupplyChainRole[]>,
 ): Router {
   const router = Router();
 
@@ -142,7 +143,7 @@ export function createProductsRouter(
   router.post(
     '/shipments',
     requireAuth(jwtSecret),
-    requireRoles('MANUFACTURER', 'DISTRIBUTOR', 'WAREHOUSE', 'RETAILER'),
+    requireLiveRoles(resolveRoles, 'MANUFACTURER', 'DISTRIBUTOR', 'WAREHOUSE', 'RETAILER'),
     async (req: AuthenticatedRequest, res, next) => {
       try {
         const input = ShipmentNoteSchema.parse(req.body);

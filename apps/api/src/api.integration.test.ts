@@ -285,5 +285,106 @@ describe('ChainTrace API Integration & Failure Resilience', () => {
     expect(degradedRpcRes.body.verdict).toBe('RPC_UNAVAILABLE_CACHED');
     expect(degradedRpcRes.body.source).toBe('INDEX_CACHE_RPC_OFFLINE');
     await deadRpcPool.destroy();
+
+    // 9. SIWE domain mismatch & chainId mismatch rejected (401)
+    const badNonce = await request(app)
+      .post('/api/auth/nonce')
+      .send({ walletAddress: manufacturer.address });
+    const wrongDomainMsg = `evil.example.com wants you to sign in with your Ethereum account:
+${manufacturer.address}
+
+Sign in
+
+URI: https://evil.example.com
+Version: 1
+Chain ID: 31337
+Nonce: ${badNonce.body.nonce}
+Issued At: ${new Date().toISOString()}`;
+    const wrongDomainSig = await manufacturer.signMessage(wrongDomainMsg);
+    const wrongDomainRes = await request(app)
+      .post('/api/auth/verify')
+      .send({ message: wrongDomainMsg, signature: wrongDomainSig });
+    expect(wrongDomainRes.status).toBe(401);
+
+    // 10. Durable PostgreSQL Relayer: EIP-712 gasless claim, deduplication & DEAD_LETTER on invalid signature
+    const relayerApp = createApp({
+      config: {
+        ...loadConfig(),
+        databaseUrl: process.env.DATABASE_URL || '',
+        rpcUrls: [RPC_URL],
+        contractAddress,
+        chainId: 31337,
+        relayerPrivateKey: admin.privateKey,
+      },
+      pool,
+      rpcPool,
+      ipfsClient,
+    });
+
+    const claimUnit = sampleProducts[1];
+    const qr2Res = await request(app)
+      .get(`/api/batches/${batchId}/products/${claimUnit.productId}/qr`)
+      .set('Authorization', `Bearer ${mfgToken}`);
+    const claimSecret2 = qr2Res.body.payload.claimSecret as string;
+    const deadline = Math.floor(Date.now() / 1000) + 3600;
+    const domain = {
+      name: 'ChainTraceRegistry',
+      version: '1',
+      chainId: 31337,
+      verifyingContract: contractAddress,
+    };
+    const claimTypes = {
+      ClaimIntent: [
+        { name: 'batchId', type: 'bytes32' },
+        { name: 'productId', type: 'bytes32' },
+        { name: 'claimant', type: 'address' },
+        { name: 'claimSecretDigest', type: 'bytes32' },
+        { name: 'expectedNonce', type: 'uint64' },
+        { name: 'deadline', type: 'uint256' },
+      ],
+    };
+    const claimSig = await customer.signTypedData(domain, claimTypes, {
+      batchId,
+      productId: claimUnit.productId,
+      claimant: customer.address,
+      claimSecretDigest: ethers.keccak256(ethers.toUtf8Bytes(claimSecret2)),
+      expectedNonce: 0n,
+      deadline: BigInt(deadline),
+    });
+
+    const relayerPayload = {
+      idempotencyKey: `claim-${claimUnit.productId}`,
+      batchId,
+      productId: claimUnit.productId,
+      serialNumber: claimUnit.serialNumber,
+      metadataHash: qr2Res.body.payload.metadataHash,
+      claimSecretHash: claimUnit.claimSecretHash,
+      merkleProof: claimUnit.merkleProof,
+      claimant: customer.address,
+      claimSecret: claimSecret2,
+      expectedNonce: 0,
+      deadline,
+      signature: claimSig,
+    };
+
+    const relayRes1 = await request(relayerApp).post('/api/relayer/claim').send(relayerPayload);
+    expect(relayRes1.status).toBe(200);
+    expect(relayRes1.body.status).toBe('CONFIRMED');
+    expect(relayRes1.body.txHash).toMatch(/^0x/);
+
+    // Duplicate idempotencyKey returns deduplicated=true without re-submitting tx
+    const relayDup = await request(relayerApp).post('/api/relayer/claim').send(relayerPayload);
+    expect(relayDup.status).toBe(200);
+    expect(relayDup.body.deduplicated).toBe(true);
+
+    // Invalid claim secret transitions durable job to DEAD_LETTER
+    const deadLetterRes = await request(relayerApp)
+      .post('/api/relayer/claim')
+      .send({
+        ...relayerPayload,
+        idempotencyKey: `claim-dead-${Date.now()}`,
+        claimSecret: 'WRONG-SECRET',
+      });
+    expect(deadLetterRes.body.status).toBe('DEAD_LETTER');
   });
 });

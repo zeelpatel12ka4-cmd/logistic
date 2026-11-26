@@ -416,6 +416,10 @@ export default function VerifyPage() {
                     </span>
                   </div>
                   {verifyData?.warning && <div className="text-xs mt-1 font-medium">{verifyData.warning}</div>}
+                  <div className="text-xs mt-1 text-slate-700">
+                    Note: Digital verification confirms the blockchain commitment only and does not
+                    independently establish physical packaging authenticity.
+                  </div>
                 </div>
               </div>
 

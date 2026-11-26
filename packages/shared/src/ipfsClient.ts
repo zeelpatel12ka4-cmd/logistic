@@ -1,5 +1,18 @@
 import { canonicalizeJson, computeMetadataHash } from './crypto';
 
+export type IpfsMetadataStatus =
+  | 'METADATA_VERIFIED'
+  | 'CONTENT_HASH_MISMATCH'
+  | 'CID_INVALID'
+  | 'IPFS_OFFLINE'
+  | 'METADATA_UNAVAILABLE';
+
+export function isValidIpfsCid(cid: string): boolean {
+  if (!cid || typeof cid !== 'string') return false;
+  // CIDv0 (Qm...) or CIDv1 base32/base58 (bafy.../bafk...)
+  return /^Qm[1-9A-HJ-NP-Za-km-z]{44}$/.test(cid) || /^b[a-z2-7]{50,}$/i.test(cid);
+}
+
 export interface IpfsPinResult {
   cid: string;
   metadataHash: string;
@@ -54,7 +67,16 @@ export class IpfsClient {
   public async fetchAndVerifyJson(
     cid: string,
     expectedMetadataHash?: string,
-  ): Promise<{ data: unknown; verified: boolean; canonicalJson: string }> {
+  ): Promise<{
+    data: unknown;
+    verified: boolean;
+    status: IpfsMetadataStatus;
+    canonicalJson: string | null;
+  }> {
+    if (!isValidIpfsCid(cid)) {
+      return { data: null, verified: false, status: 'CID_INVALID', canonicalJson: null };
+    }
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
@@ -66,8 +88,11 @@ export class IpfsClient {
           signal: controller.signal,
         },
       );
+      if (res.status === 404 || res.status === 500) {
+        return { data: null, verified: false, status: 'METADATA_UNAVAILABLE', canonicalJson: null };
+      }
       if (!res.ok) {
-        throw new Error(`IPFS cat failed with HTTP ${res.status}`);
+        return { data: null, verified: false, status: 'IPFS_OFFLINE', canonicalJson: null };
       }
       const rawText = await res.text();
       const parsed = JSON.parse(rawText);
@@ -76,7 +101,14 @@ export class IpfsClient {
       const verified = expectedMetadataHash
         ? actualHash.toLowerCase() === expectedMetadataHash.toLowerCase()
         : true;
-      return { data: parsed, verified, canonicalJson };
+      return {
+        data: parsed,
+        verified,
+        status: verified ? 'METADATA_VERIFIED' : 'CONTENT_HASH_MISMATCH',
+        canonicalJson,
+      };
+    } catch {
+      return { data: null, verified: false, status: 'IPFS_OFFLINE', canonicalJson: null };
     } finally {
       clearTimeout(timer);
     }

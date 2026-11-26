@@ -11,17 +11,33 @@ import {
   CreateBatchRequest,
   CustodyStatus,
   IpfsClient,
+  MerkleTreeInstance,
   QrPayload,
 } from '@chaintrace/shared';
 import { HttpError } from '../middleware/errorHandler';
+import { decryptClaimSecret, encryptClaimSecret } from './secretCrypto';
 
 export class BatchService {
+  private readonly treeCache = new Map<string, MerkleTreeInstance>();
+  private readonly maxCachedTrees = 4;
+
   constructor(
     private readonly pool: Pool,
     private readonly ipfsClient: IpfsClient,
     private readonly chainId: number,
     private readonly contractAddress: string,
+    private readonly secretEncryptionKey: Buffer,
   ) {}
+
+  private cacheTree(batchId: string, tree: MerkleTreeInstance): void {
+    if (this.treeCache.has(batchId)) {
+      this.treeCache.delete(batchId);
+    } else if (this.treeCache.size >= this.maxCachedTrees) {
+      const oldestKey = this.treeCache.keys().next().value;
+      if (oldestKey) this.treeCache.delete(oldestKey);
+    }
+    this.treeCache.set(batchId, tree);
+  }
 
   public async prepareBatch(manufacturerAddress: string, input: CreateBatchRequest) {
     const checksummedMfg = ethers.getAddress(manufacturerAddress);
@@ -51,13 +67,12 @@ export class BatchService {
     const pinResult = await this.ipfsClient.pinJson(metadataDoc);
     const metadataHash = pinResult.metadataHash;
 
-    // Generate deterministic product IDs, sealed claim secrets, and Merkle tree
     const leaves: string[] = new Array(input.unitCount);
     const rows: Array<{
       productId: string;
       serialNumber: string;
       leafIndex: number;
-      claimSecret: string | null;
+      encryptedSecret: string | null;
       claimSecretHash: string;
     }> = new Array(input.unitCount);
 
@@ -69,6 +84,9 @@ export class BatchService {
         ? `CT-${crypto.randomBytes(8).toString('hex').toUpperCase()}`
         : null;
       const claimSecretHash = claimSecret ? computeClaimSecretHash(claimSecret) : ethers.ZeroHash;
+      const encryptedSecret = claimSecret
+        ? encryptClaimSecret(claimSecret, this.secretEncryptionKey)
+        : null;
 
       leaves[i] = computeLeaf({
         batchId,
@@ -82,13 +100,16 @@ export class BatchService {
         productId,
         serialNumber,
         leafIndex: i,
-        claimSecret,
+        encryptedSecret,
         claimSecretHash,
       };
     }
 
     const tree = buildMerkleTree(leaves);
     const storeProofsInline = input.unitCount <= 2000;
+    if (!storeProofsInline) {
+      this.cacheTree(batchId, tree);
+    }
 
     const client = await this.pool.connect();
     try {
@@ -119,7 +140,6 @@ export class BatchService {
         ],
       );
 
-      // Chunked UNNEST inserts to handle 10,000-100,000 units smoothly
       const chunkSize = 2500;
       for (let start = 0; start < rows.length; start += chunkSize) {
         const chunk = rows.slice(start, start + chunkSize);
@@ -154,12 +174,12 @@ export class BatchService {
         );
 
         if (input.includeClaimSecrets) {
-          const secrets = chunk.map((r) => r.claimSecret as string);
+          const encryptedSecrets = chunk.map((r) => r.encryptedSecret as string);
           await client.query(
-            `INSERT INTO product_secrets (product_id, claim_secret)
-             SELECT u.product_id, u.claim_secret
-             FROM UNNEST($1::text[], $2::text[]) AS u(product_id, claim_secret)`,
-            [productIds, secrets],
+            `INSERT INTO product_secrets (product_id, claim_secret, encrypted_claim_secret)
+             SELECT u.product_id, NULL, u.encrypted_claim_secret
+             FROM UNNEST($1::text[], $2::text[]) AS u(product_id, encrypted_claim_secret)`,
+            [productIds, encryptedSecrets],
           );
         }
       }
@@ -208,6 +228,11 @@ export class BatchService {
       return existing.rows[0].merkle_proof;
     }
 
+    const cachedTree = this.treeCache.get(batchId);
+    if (cachedTree) {
+      return cachedTree.getProof(existing.rows[0].leaf_index);
+    }
+
     const allLeaves = await this.pool.query<{
       product_id: string;
       serial_number: string;
@@ -229,13 +254,27 @@ export class BatchService {
       }),
     );
     const tree = buildMerkleTree(leaves);
+    this.cacheTree(batchId, tree);
     return tree.getProof(existing.rows[0].leaf_index);
+  }
+
+  public async retireClaimSecret(productId: string, reason: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE product_secrets
+       SET claim_secret = NULL,
+           encrypted_claim_secret = NULL,
+           retired_at = NOW(),
+           retired_reason = $2
+       WHERE product_id = $1 AND retired_at IS NULL`,
+      [productId, reason],
+    );
   }
 
   public async buildProductQrBundle(
     batchId: string,
     productId: string,
     includeSecret: boolean,
+    actorWallet?: string,
   ): Promise<{ payload: QrPayload; qrDataUrl: string }> {
     const res = await this.pool.query<{
       product_id: string;
@@ -243,9 +282,12 @@ export class BatchService {
       serial_number: string;
       metadata_hash: string;
       claim_secret_hash: string;
-      claim_secret: string | null;
+      claimed: boolean;
+      encrypted_claim_secret: string | null;
+      retired_at: string | null;
     }>(
-      `SELECT p.product_id, p.batch_id, p.serial_number, p.metadata_hash, p.claim_secret_hash, ps.claim_secret
+      `SELECT p.product_id, p.batch_id, p.serial_number, p.metadata_hash, p.claim_secret_hash,
+              p.claimed, ps.encrypted_claim_secret, ps.retired_at
        FROM products p
        LEFT JOIN product_secrets ps ON ps.product_id = p.product_id
        WHERE p.batch_id = $1 AND (p.product_id = $2 OR p.serial_number = $2)`,
@@ -259,6 +301,27 @@ export class BatchService {
     const row = res.rows[0];
     const proof = await this.getMerkleProofForProduct(row.batch_id, row.product_id);
 
+    let claimSecret: string | undefined;
+    if (includeSecret) {
+      if (row.claimed || row.retired_at) {
+        throw new HttpError(
+          410,
+          'CLAIM_SECRET_RETIRED',
+          'Claim secret has been retired after product claim',
+        );
+      }
+      if (row.encrypted_claim_secret) {
+        claimSecret = decryptClaimSecret(row.encrypted_claim_secret, this.secretEncryptionKey);
+      }
+      if (actorWallet) {
+        await this.pool.query(
+          `INSERT INTO secret_access_logs (batch_id, product_id, actor_wallet, action)
+           VALUES ($1, $2, $3, 'QR_SECRET_EXPORT')`,
+          [row.batch_id, row.product_id, actorWallet],
+        );
+      }
+    }
+
     const payload: QrPayload = {
       v: 1,
       chainId: this.chainId,
@@ -269,7 +332,7 @@ export class BatchService {
       serialNumber: row.serial_number,
       metadataHash: row.metadata_hash,
       claimSecretHash: row.claim_secret_hash,
-      ...(includeSecret && row.claim_secret ? { claimSecret: row.claim_secret } : {}),
+      ...(claimSecret ? { claimSecret } : {}),
       merkleProof: proof,
     };
 

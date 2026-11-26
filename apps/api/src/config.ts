@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
+import { resolveSecretEncryptionKey } from './services/secretCrypto';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
@@ -14,6 +15,7 @@ export interface AppConfig {
   chainId: number;
   contractAddress: string;
   jwtSecret: string;
+  secretEncryptionKey: Buffer;
   siweDomain: string;
   corsOrigins: string[];
   relayerPrivateKey: string;
@@ -36,8 +38,19 @@ export function resolveContractAddress(): string {
 }
 
 export function loadConfig(): AppConfig {
+  const nodeEnv = process.env.NODE_ENV || 'development';
+  const rawJwtSecret = process.env.JWT_SECRET || '';
+  const isDefaultSecret =
+    !rawJwtSecret ||
+    rawJwtSecret === 'dev_only_change_me_at_least_32_characters_long' ||
+    rawJwtSecret.length < 32;
+
+  if (nodeEnv === 'production' && isDefaultSecret) {
+    throw new Error('JWT_SECRET must be set to a strong >=32 char secret in production');
+  }
+
   return {
-    nodeEnv: process.env.NODE_ENV || 'development',
+    nodeEnv,
     port: Number(process.env.API_PORT || '4000'),
     databaseUrl:
       process.env.DATABASE_URL ||
@@ -50,7 +63,8 @@ export function loadConfig(): AppConfig {
       .filter(Boolean),
     chainId: Number(process.env.CHAIN_ID || '31337'),
     contractAddress: resolveContractAddress(),
-    jwtSecret: process.env.JWT_SECRET || 'dev_only_change_me_at_least_32_characters_long',
+    jwtSecret: rawJwtSecret || 'dev_only_change_me_at_least_32_characters_long',
+    secretEncryptionKey: resolveSecretEncryptionKey(process.env.SECRET_ENCRYPTION_KEY, nodeEnv),
     siweDomain: process.env.SIWE_DOMAIN || 'localhost:3000',
     corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:3000')
       .split(',')

@@ -18,6 +18,7 @@ export class AuthService {
     private readonly contractAddress: string,
     private readonly jwtSecret: string,
     private readonly chainId: number,
+    private readonly siweDomain: string = 'localhost:3000',
   ) {}
 
   public async issueNonce(walletAddress: string): Promise<{ nonce: string; expiresAt: string }> {
@@ -80,6 +81,13 @@ export class AuthService {
 
     const walletAddress = ethers.getAddress(siweMessage.address);
 
+    if (siweMessage.domain !== this.siweDomain) {
+      throw new HttpError(401, 'INVALID_SIWE_DOMAIN', `SIWE domain mismatch (expected ${this.siweDomain})`);
+    }
+    if (siweMessage.chainId !== this.chainId) {
+      throw new HttpError(401, 'INVALID_SIWE_CHAIN', `SIWE chainId mismatch (expected ${this.chainId})`);
+    }
+
     // Atomically consume unused non-expired nonce to prevent replay
     const consumeRes = await this.pool.query<{ nonce: string }>(
       `UPDATE auth_nonces
@@ -100,6 +108,7 @@ export class AuthService {
       const verifyResult = await siweMessage.verify({
         signature,
         nonce: siweMessage.nonce,
+        domain: this.siweDomain,
       });
       if (!verifyResult.success) {
         throw new HttpError(401, 'INVALID_SIGNATURE', 'SIWE signature verification failed');

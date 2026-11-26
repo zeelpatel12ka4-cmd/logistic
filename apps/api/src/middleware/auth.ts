@@ -49,23 +49,32 @@ export function requireAuth(jwtSecret: string) {
   };
 }
 
-export function requireRoles(...allowed: SupplyChainRole[]) {
-  return (req: AuthenticatedRequest, _res: Response, next: NextFunction): void => {
+export function requireLiveRoles(
+  resolveRoles: (walletAddress: string) => Promise<SupplyChainRole[]>,
+  ...allowed: SupplyChainRole[]
+) {
+  return async (req: AuthenticatedRequest, _res: Response, next: NextFunction): Promise<void> => {
     if (!req.auth) {
       next(new HttpError(401, 'UNAUTHORIZED', 'Authentication required'));
       return;
     }
-    const hasAccess = req.auth.roles.some((r) => allowed.includes(r) || r === 'ADMIN');
-    if (!hasAccess) {
-      next(
-        new HttpError(
-          403,
-          'FORBIDDEN',
-          `Requires one of on-chain roles: ${allowed.join(', ')}`,
-        ),
-      );
-      return;
+    try {
+      const liveRoles = await resolveRoles(req.auth.walletAddress);
+      const hasAccess = liveRoles.some((r) => allowed.includes(r) || r === 'ADMIN');
+      if (!hasAccess) {
+        next(
+          new HttpError(
+            403,
+            'FORBIDDEN',
+            `Requires active on-chain role: ${allowed.join(', ')}`,
+          ),
+        );
+        return;
+      }
+      req.auth.roles = liveRoles;
+      next();
+    } catch (err) {
+      next(err);
     }
-    next();
   };
 }
